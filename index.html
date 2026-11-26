@@ -71,7 +71,7 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
 .sws{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .sws button{height:38px;border-radius:8px;border:2px solid transparent;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
 .sws button[aria-pressed=true]{border-color:#111}
-.nbtn{flex:none;width:34px;height:34px;border:0;border-radius:50%;background:transparent;font-size:16px;cursor:pointer;opacity:.5}
+.nbtn{flex:none;width:34px;height:34px;border:0;border-radius:50%;background:transparent;font-size:18px;cursor:pointer;opacity:.85}
 .nbtn:hover,.nbtn:focus-visible{opacity:1;background:rgba(255,255,255,.55)}
 .nic{flex:none;font-size:17px}
 .ntitle{line-height:42px;white-space:nowrap;overflow:hidden;cursor:pointer;font-weight:600}
@@ -97,7 +97,7 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
   </div>
   <div id="list"></div>
   <div id="foot">
-    <span id="count"></span>
+    <span><span id="count"></span> <small style="opacity:.6">v3</small></span>
     <label class="sw"><input type="checkbox" id="showDone"> Mostrar completadas</label>
   </div>
   <section id="note" hidden aria-label="Nota">
