@@ -56,7 +56,7 @@ body{background:#e4e8ed;font:17px/1.2 "Avenir Next","Segoe UI",system-ui,sans-se
 .sw input::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
 .sw input:checked{background:#333}
 .sw input:checked::after{transform:translateX(16px)}
-#grip{position:absolute;right:0;bottom:0;width:34px;height:34px;cursor:nwse-resize;touch-action:none;
+#grip{position:absolute;z-index:10;right:0;bottom:0;width:34px;height:34px;cursor:nwse-resize;touch-action:none;
   background:linear-gradient(135deg,transparent 0 50%,#9aa3ad 50% 56%,transparent 56% 66%,#9aa3ad 66% 72%,transparent 72% 82%,#9aa3ad 82% 88%,transparent 88%)}
 .ghost{position:fixed;z-index:50;pointer-events:none;box-shadow:0 8px 22px rgba(0,0,0,.28);border-radius:8px;opacity:.95}
 dialog{border:0;border-radius:14px;padding:18px;width:min(340px,calc(100vw - 32px));box-shadow:0 16px 40px rgba(0,0,0,.3);font:inherit;color:var(--ink)}
@@ -71,6 +71,19 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
 .sws{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .sws button{height:38px;border-radius:8px;border:2px solid transparent;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
 .sws button[aria-pressed=true]{border-color:#111}
+.nbtn{flex:none;width:34px;height:34px;border:0;border-radius:50%;background:transparent;font-size:16px;cursor:pointer;opacity:.5}
+.nbtn:hover,.nbtn:focus-visible{opacity:1;background:rgba(255,255,255,.55)}
+.nic{flex:none;font-size:17px}
+.ntitle{line-height:42px;white-space:nowrap;overflow:hidden;cursor:pointer;font-weight:600}
+.ib.on{background:#111;color:#fff}
+#note{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;background:var(--bg,#FFF3B0)}
+#note[hidden]{display:none}
+#nh{flex:none;display:flex;align-items:center;gap:6px;padding:8px 8px 8px 6px;border-bottom:2px solid rgba(0,0,0,.22)}
+#nh .ib{margin:0}
+#nTitle{flex:1;min-width:0;font:inherit;font-size:20px;font-weight:700;border:0;background:transparent;padding:6px;outline:none;border-radius:6px;color:var(--ink)}
+#nTitle:focus{background:rgba(255,255,255,.5)}
+#nBody{flex:1;min-height:0;border:0;resize:none;outline:none;font:inherit;line-height:32px;color:var(--ink);padding:0 16px 40px;
+  background-color:transparent;background-image:repeating-linear-gradient(to bottom,transparent 0 31px,var(--line) 31px 32px);background-attachment:local}
 :focus-visible{outline:2px solid #111;outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -87,11 +100,17 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
     <span id="count"></span>
     <label class="sw"><input type="checkbox" id="showDone"> Mostrar completadas</label>
   </div>
+  <section id="note" hidden aria-label="Nota">
+    <div id="nh"><button class="ib" id="nBack" aria-label="Volver">←</button>
+      <input id="nTitle" type="text" maxlength="200" autocomplete="off" aria-label="Título de la nota">
+      <button class="ib" id="nMic" aria-label="Dictar">🎤</button></div>
+    <textarea id="nBody" placeholder="Escribe la nota…" aria-label="Texto de la nota"></textarea>
+  </section>
   <div id="grip" title="Cambiar tamaño" aria-label="Cambiar tamaño"></div>
 </main>
 
 <dialog id="dc"><form method="dialog"><p id="dcMsg"></p>
-  <div class="btns"><button class="btn" value="no">Cancelar</button><button class="btn pri" value="yes">Borrar</button></div></form></dialog>
+  <div class="btns"><button class="btn" value="no">Cancelar</button><button class="btn pri" value="yes" id="dcOk">Borrar</button></div></form></dialog>
 
 <dialog id="dt"><form method="dialog">
   <label for="tn">Nombre de la pestaña</label><input type="text" id="tn" maxlength="30" autocomplete="off">
@@ -117,13 +136,13 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 const cur=()=>S.tabs.find(t=>t.id===S.active);
 
 /* ---------- diálogos ---------- */
-function ask(msg){return new Promise(res=>{
+function ask(msg,ok='Borrar'){return new Promise(res=>{$('dcOk').textContent=ok;
   $('dcMsg').textContent=msg;const d=$('dc');d.returnValue='';
   d.onclose=()=>res(d.returnValue==='yes');d.showModal();
 })}
 
 /* ---------- render ---------- */
-let ni=null,rec=null;
+let ni=null,commitNew=null,suppress=false,openK=null,dict=null;
 function render(){renderTabs();renderList();applySize()}
 
 function renderTabs(){
@@ -137,6 +156,8 @@ function renderTabs(){
   const on=box.querySelector('.on');if(on)on.scrollIntoView({inline:'nearest',block:'nearest'});
 }
 
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+
 function renderList(){
   const t=cur(),list=$('list');
   list.style.setProperty('--bg',t.color);
@@ -146,31 +167,26 @@ function renderList(){
   const nr=el('div','row new');
   nr.append(el('span','grip'));
   const plus=el('button','cb');plus.type='button';plus.textContent='+';plus.setAttribute('aria-label','Añadir tarea');
-  ni=el('input','tx');ni.type='text';ni.placeholder='Nueva tarea…';ni.enterKeyHint='done';ni.autocomplete='off';
-  ni.setAttribute('aria-label','Nueva tarea');
-  const commit=focus=>{const v=ni.value.trim();ni.value='';if(!v)return;
-    const k={id:uid(),text:v,done:false};cur().tasks.push(k);save();nr.before(rowEl(k));updateCount();if(focus)ni.focus()};
-  ni.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}};
-  ni.onblur=()=>{setTimeout(()=>{if(document.activeElement!==ni)commit(false)},0)};
+  const me=ni=el('input','tx');me.type='text';me.placeholder='Nueva tarea…';me.enterKeyHint='done';me.autocomplete='off';
+  me.setAttribute('aria-label','Nueva tarea');
+  const commit=focus=>{const v=me.value.trim();me.value='';if(!v)return;
+    const k={id:uid(),text:v,done:false};cur().tasks.push(k);save();nr.before(rowEl(k));updateCount();if(focus)me.focus()};
+  commitNew=commit;
+  const open=()=>{if(document.activeElement===me)me.blur();me.focus()};
+  me.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();stopDict();commit(true)}};
+  me.onblur=()=>{setTimeout(()=>{if(document.activeElement!==me&&!(dict&&dict.input===me))commit(false)},0)};
   plus.onpointerdown=e=>e.preventDefault();
-  plus.onclick=()=>commit(true);
-  nr.append(plus,ni);
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  plus.onclick=()=>{if(me.value.trim())commit(true);else open()};
+  nr.addEventListener('click',e=>{if(e.target!==me&&e.target!==plus&&!e.target.closest('.mic'))open()});
+  nr.append(plus,me);
   if(SR){
     const mic=el('button','mic');mic.type='button';mic.textContent='🎤';mic.setAttribute('aria-label','Dictar tarea');
     mic.onpointerdown=e=>e.preventDefault();
-    mic.onclick=()=>{
-      if(rec){rec.stop();return}
-      rec=new SR();rec.lang='es-ES';rec.interimResults=true;
-      rec.onresult=e=>{ni.value=[...e.results].map(r=>r[0].transcript).join('')};
-      rec.onerror=()=>{};
-      rec.onend=()=>{rec=null;mic.classList.remove('on');ni.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'}))};
-      mic.classList.add('on');rec.start();
-    };
+    mic.onclick=()=>toggleDict(me,mic,[nr]);
     nr.append(mic);
   }
   list.append(nr);
-  const fill=el('div','fill');fill.onclick=()=>ni.focus();list.append(fill);
+  const fill=el('div','fill');fill.onclick=open;list.append(fill);
   updateCount();
 }
 
@@ -179,30 +195,117 @@ function updateCount(){
   $('count').textContent=n===1?'1 pendiente':n+' pendientes';
 }
 
+/* con ratón: al pasar por encima de un texto largo, se desplaza para verlo entero */
+function hoverScroll(n){
+  n.addEventListener('pointermove',e=>{
+    if(e.pointerType!=='mouse'||document.activeElement===n)return;
+    const m=n.scrollWidth-n.clientWidth;if(m<=0)return;
+    const r=n.getBoundingClientRect();
+    n.scrollLeft=m*Math.min(1,Math.max(0,(e.clientX-r.left)/r.width));
+  });
+  n.addEventListener('pointerleave',()=>{if(document.activeElement!==n)n.scrollLeft=0});
+}
+
 function rowEl(k){
-  const r=el('div','row'+(k.done?' done':''));r.dataset.id=k.id;
+  const r=el('div','row'+(k.done?' done':'')+(k.note?' note':''));r.dataset.id=k.id;
   const g=el('span','grip');g.textContent='⠿';g.setAttribute('aria-label','Arrastrar para ordenar o mover');
   const cb=el('input','cb');cb.type='checkbox';cb.checked=k.done;cb.setAttribute('aria-label','Completada');
   cb.onchange=()=>{k.done=cb.checked;save();if(!S.showDone&&k.done)r.remove();else r.classList.toggle('done',k.done);updateCount()};
-  const tx=el('input','tx');tx.type='text';tx.value=k.text;tx.autocomplete='off';tx.enterKeyHint='done';
-  tx.onfocus=()=>{tx.dataset.old=k.text};
-  tx.oninput=()=>{k.text=tx.value;save()};
-  tx.onblur=()=>{const v=tx.value.trim();if(!v){k.text=tx.dataset.old;tx.value=k.text}else{k.text=v;tx.value=v}save()};
-  tx.onkeydown=e=>{if(e.key==='Enter')tx.blur()};
-  r.append(g,cb,tx);
+  r.append(g,cb);
+  let tx;
+  if(k.note){
+    const ic=el('span','nic');ic.textContent='📝';ic.setAttribute('aria-hidden','true');
+    tx=el('div','tx ntitle');tx.textContent=k.text;tx.tabIndex=0;tx.setAttribute('role','button');
+    tx.onclick=()=>{if(suppress){suppress=false;return}openNote(k)};
+    tx.onkeydown=e=>{if(e.key==='Enter')openNote(k)};
+    r.append(ic,tx);
+  }else{
+    tx=el('input','tx');tx.type='text';tx.value=k.text;tx.autocomplete='off';tx.enterKeyHint='done';
+    tx.onfocus=()=>{tx.dataset.old=k.text};
+    tx.oninput=()=>{k.text=tx.value;save()};
+    tx.onblur=()=>{const v=tx.value.trim();if(!v){k.text=tx.dataset.old;tx.value=k.text}else{k.text=v;tx.value=v}save()};
+    tx.onkeydown=e=>{if(e.key==='Enter')tx.blur()};
+    const nb=el('button','nbtn');nb.type='button';nb.textContent='📝';nb.title='Convertir en nota';nb.setAttribute('aria-label','Convertir en nota');
+    nb.onclick=async()=>{
+      if(await ask('¿Convertir «'+k.text+'» en nota? Una nota no se puede volver a convertir en tarea.','Convertir')){
+        k.note=true;k.body='';save();renderList();
+      }
+    };
+    r.append(tx,nb);
+  }
+  hoverScroll(tx);
   r.oncontextmenu=e=>e.preventDefault();
-  r.addEventListener('pointerdown',e=>{if(e.target===g||e.target===cb)return;longPress(e,k)});
+  r.addEventListener('pointerdown',e=>{if(e.target===g||e.target===cb||e.target.closest('.nbtn'))return;longPress(e,k)});
   g.addEventListener('pointerdown',e=>startDrag(e,r,k,g));
   return r;
 }
 
+/* ---------- dictado continuo: no se cierra hasta pulsar fuera ---------- */
+function startDict(input,btn,zone){
+  stopDict();
+  const d=dict={input,btn,zone,base:input.value,fin:'',rec:null,active:true};
+  const show=it=>{
+    const p=[d.fin,it.trim()].filter(Boolean).join(' ');
+    input.value=p?(d.base&&!/\s$/.test(d.base)?d.base+' ':d.base)+p:d.base;
+    input.dispatchEvent(new Event('input'));
+  };
+  const begin=()=>{
+    if(!d.active)return;
+    const rec=d.rec=new SR();rec.lang='es-ES';rec.continuous=true;rec.interimResults=true;
+    rec.onresult=e=>{
+      if(!d.active)return;let it='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const r=e.results[i];
+        if(r.isFinal)d.fin+=(d.fin?' ':'')+r[0].transcript.trim();else it+=r[0].transcript;
+      }
+      show(it);
+    };
+    rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed')stopDict()};
+    rec.onend=()=>{if(d.active)setTimeout(begin,150)};
+    try{rec.start()}catch(_){}
+  };
+  d.user=()=>stopDict();
+  input.addEventListener('keydown',d.user);input.addEventListener('pointerdown',d.user);
+  btn.classList.add('on');begin();
+}
+function stopDict(){
+  const d=dict;if(!d)return;dict=null;d.active=false;
+  d.btn.classList.remove('on');
+  d.input.removeEventListener('keydown',d.user);d.input.removeEventListener('pointerdown',d.user);
+  try{d.rec&&d.rec.stop()}catch(_){}
+}
+function toggleDict(input,btn,zone){if(dict&&dict.btn===btn)stopDict();else startDict(input,btn,zone)}
+document.addEventListener('pointerdown',e=>{
+  if(!dict||dict.zone.some(z=>z.contains(e.target)))return;
+  const isNew=dict.input===ni;stopDict();
+  if(isNew&&commitNew){commitNew(false);ni.blur()}
+},true);
+
+/* ---------- notas ---------- */
+function openNote(k){
+  openK=k;const n=$('note');n.style.setProperty('--bg',cur().color);
+  $('nTitle').value=k.text;$('nBody').value=k.body||'';n.hidden=false;
+  history.pushState({n:1},'');
+  if(!k.body)$('nBody').focus();
+}
+function closeNote(){stopDict();const k=openK;openK=null;$('note').hidden=true;renderList()}
+$('nBack').onclick=()=>history.back();
+addEventListener('popstate',()=>{if(openK)closeNote()});
+addEventListener('keydown',e=>{if(e.key==='Escape'&&openK)history.back()});
+$('nTitle').oninput=()=>{if(openK&&$('nTitle').value.trim()){openK.text=$('nTitle').value;save()}};
+$('nTitle').onblur=()=>{if(!openK)return;if(!$('nTitle').value.trim())$('nTitle').value=openK.text;save()};
+$('nBody').oninput=()=>{if(openK){openK.body=$('nBody').value;save()}};
+if(SR)$('nMic').onclick=()=>toggleDict($('nBody'),$('nMic'),[$('nMic'),$('nBody')]);
+else $('nMic').style.display='none';
+
 /* ---------- pulsación larga: borrar ---------- */
 function longPress(e,k){
+  suppress=false;
   const x=e.clientX,y=e.clientY;
   const t=setTimeout(async()=>{
-    cancel();if(document.activeElement)document.activeElement.blur();
+    cancel();suppress=true;if(document.activeElement)document.activeElement.blur();
     navigator.vibrate&&navigator.vibrate(30);
-    if(await ask('¿Borrar la tarea «'+k.text+'»?')){
+    if(await ask('¿Borrar '+(k.note?'la nota':'la tarea')+' «'+k.text+'»?')){
       const t2=cur();t2.tasks=t2.tasks.filter(z=>z!==k);save();renderList();
     }
   },1200);
