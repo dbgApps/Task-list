@@ -50,12 +50,14 @@ body{background:#e4e8ed;font:17px/1.2 "Avenir Next","Segoe UI",system-ui,sans-se
 .mic{flex:none;width:34px;height:34px;border:0;border-radius:50%;background:rgba(255,255,255,.55);font-size:17px;cursor:pointer}
 .mic.on{background:#111;color:#fff}
 .fill{flex:1;min-height:var(--row);cursor:text}
-#foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 38px 8px 14px;font-size:14px;color:#333;background:var(--chrome)}
-.sw{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
-.sw input{appearance:none;-webkit-appearance:none;width:38px;height:22px;margin:0;border-radius:11px;background:#b9c0c8;position:relative;cursor:pointer;transition:background .15s}
-.sw input::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+#foot{background:var(--chrome);color:#333;padding:0 38px 0 14px}
+#fr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0 1px;font-size:12px;line-height:16px}
+#cr{font-size:10.5px;line-height:14px;padding:0 0 4px;color:#666}
+.sw{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.sw input{appearance:none;-webkit-appearance:none;width:28px;height:16px;margin:0;border-radius:8px;background:#b9c0c8;position:relative;cursor:pointer;transition:background .15s}
+.sw input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .15s}
 .sw input:checked{background:#333}
-.sw input:checked::after{transform:translateX(16px)}
+.sw input:checked::after{transform:translateX(12px)}
 #grip{position:absolute;z-index:10;right:0;bottom:0;width:34px;height:34px;cursor:nwse-resize;touch-action:none;
   background:linear-gradient(135deg,transparent 0 50%,#9aa3ad 50% 56%,transparent 56% 66%,#9aa3ad 66% 72%,transparent 72% 82%,#9aa3ad 82% 88%,transparent 88%)}
 .ghost{position:fixed;z-index:50;pointer-events:none;box-shadow:0 8px 22px rgba(0,0,0,.28);border-radius:8px;opacity:.95}
@@ -89,6 +91,7 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
 #nBody{flex:1;min-height:0;border:0;resize:none;outline:none;font:inherit;line-height:32px;color:var(--ink);padding:0 16px 40px;
   background-color:transparent;background-image:repeating-linear-gradient(to bottom,transparent 0 31px,var(--line) 31px 32px);background-attachment:local}
 .num{flex:none;font-size:13px;font-weight:700;color:#333;background:rgba(255,255,255,.55);border-radius:5px;padding:2px 5px}
+button.num{border:0;font-family:inherit;cursor:pointer;color:#111;min-height:28px}
 .row.project .tx{font-weight:700}
 .row.nest{box-shadow:inset 0 0 0 3px var(--ink)}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);max-width:min(92vw,360px);background:#111;color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:100}
@@ -106,8 +109,9 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
   </div>
   <div id="list"></div>
   <div id="foot">
-    <span><span id="count"></span> <small style="opacity:.6">v5</small></span>
-    <label class="sw"><input type="checkbox" id="showDone"> Mostrar completadas</label>
+    <div id="fr"><span id="count"></span>
+      <label class="sw"><input type="checkbox" id="showDone"> Mostrar completadas</label></div>
+    <div id="cr">© DBGApps 5.1</div>
   </div>
   <section id="note" hidden aria-label="Nota">
     <div id="nh"><button class="ib" id="nBack" aria-label="Volver">←</button>
@@ -184,7 +188,7 @@ function layout(t){
   let n=0;const rn=new Map();roots.forEach(x=>{if(x.project||kids(x).length)rn.set(x.id,++n)});
   const order=S.showDone?[...roots.filter(x=>!x.done),...roots.filter(x=>x.done)]:roots.filter(x=>!x.done);
   const out=[];
-  const walk=(x,d,num)=>{if(!S.showDone&&x.done)return;out.push({k:x,depth:d,num});kids(x).forEach((c,i)=>walk(c,d+1,num+'.'+(i+1)))};
+  const walk=(x,d,num)=>{if(!S.showDone&&x.done)return;const ks=kids(x);out.push({k:x,depth:d,num,kids:ks.length});if(x.open)ks.forEach((c,i)=>walk(c,d+1,num+'.'+(i+1)))};
   order.forEach(x=>walk(x,0,rn.has(x.id)?String(rn.get(x.id)):''));
   return out;
 }
@@ -212,7 +216,7 @@ function renderList(){
   const t=cur(),list=$('list');
   list.style.setProperty('--bg',t.color);
   list.innerHTML='';
-  layout(t).forEach(o=>list.append(rowEl(o.k,o.depth,o.num)));
+  layout(t).forEach(o=>list.append(rowEl(o.k,o.depth,o.num,o.kids)));
 
   const nr=el('div','row new');
   nr.append(el('span','grip'));
@@ -256,7 +260,7 @@ function hoverScroll(n){
   n.addEventListener('pointerleave',()=>{if(document.activeElement!==n)n.scrollLeft=0});
 }
 
-function rowEl(k,depth=0,num=''){
+function rowEl(k,depth=0,num='',nk=0){
   const r=el('div','row'+(k.done?' done':'')+(k.note?' note':'')+(k.project?' project':''));r.dataset.id=k.id;r.dataset.d=depth;r.style.paddingLeft=(4+Math.min(depth,6)*16)+'px';
   const g=el('span','grip');g.textContent='⠿';g.setAttribute('aria-label','Arrastrar para ordenar o mover');
   const cb=el('input','cb');cb.type='checkbox';cb.checked=k.done;cb.setAttribute('aria-label','Completada');
@@ -266,7 +270,8 @@ function rowEl(k,depth=0,num=''){
     k.done=cb.checked;if(!k.done)normalize(c);save();renderList();
   };
   r.append(g,cb);
-  if(num){const nm=el('span','num');nm.textContent=num;r.append(nm)}
+  if(num){const nm=el(nk?'button':'span','num');nm.textContent=(nk?(k.open?'▾ ':'▸ '):'')+num;if(nk){nm.type='button';nm.setAttribute('aria-expanded',String(!!k.open));nm.setAttribute('aria-label',k.open?'Cerrar lo que cuelga':'Abrir lo que cuelga');nm.onclick=()=>{k.open=!k.open;save();renderList()}}r.append(nm)}
+  if(k.project){const pi=el('span','nic');pi.textContent='📁';pi.setAttribute('aria-hidden','true');r.append(pi)}
   let tx;
   if(k.note){
     const ic=el('span','nic');ic.textContent='📝';ic.setAttribute('aria-hidden','true');
@@ -280,7 +285,6 @@ function rowEl(k,depth=0,num=''){
     tx.oninput=()=>{k.text=tx.value;save()};
     tx.onblur=()=>{const v=tx.value.trim();if(!v){k.text=tx.dataset.old;tx.value=k.text}else{k.text=v;tx.value=v}save()};
     tx.onkeydown=e=>{if(e.key==='Enter')tx.blur()};
-    if(k.project){const pi=el('span','nic');pi.textContent='📁';pi.setAttribute('aria-hidden','true');r.append(pi)}
     r.append(tx);
   }
   const mb=el('button','nbtn');mb.type='button';mb.textContent='⋮';mb.title='Opciones';mb.setAttribute('aria-label','Opciones de la '+(k.note?'nota':'tarea'));
@@ -288,7 +292,7 @@ function rowEl(k,depth=0,num=''){
   r.append(mb);
   hoverScroll(tx);
   r.oncontextmenu=e=>e.preventDefault();
-  r.addEventListener('pointerdown',e=>{if(e.target===g||e.target===cb||e.target.closest('.nbtn'))return;longPress(e,k)});
+  r.addEventListener('pointerdown',e=>{if(e.target===g||e.target===cb||e.target.closest('.nbtn')||e.target.closest('.num'))return;longPress(e,k)});
   g.addEventListener('pointerdown',e=>startDrag(e,r,k,g));
   return r;
 }
@@ -343,14 +347,15 @@ function openMenu(k,tx,btn,r){
     const b=el('button','mi'+(cls?' '+cls:''));b.type='button';b.textContent=label;
     b.onclick=()=>{$('dm').close();setTimeout(fn,0)};box.append(b);
   };
+  if(cur().tasks.some(x=>x.parent===k.id))add(k.open?'🔽  Cerrar lo que cuelga':'▶️  Abrir lo que cuelga',()=>{k.open=!k.open;save();renderList()});
   if(k.note){
     add('📖  Abrir nota',()=>openNote(k));
     add('⌨️  Editar título',()=>{openNote(k);setTimeout(()=>{const t=$('nTitle');t.focus();t.setSelectionRange(t.value.length,t.value.length)},0)});
   }else{
     add('⌨️  Editar con el teclado',()=>{tx.focus();const n=tx.value.length;tx.setSelectionRange(n,n)});
     if(SR)add('🎤  Añadir texto por voz',()=>startDict(tx,btn,[r]));
-    if(!k.project)add('📁  Convertir en proyecto',async()=>{if(await ask('¿Convertir «'+k.text+'» en proyecto? No se puede volver a convertir en tarea.','Convertir')){k.project=true;save();renderList()}});
-    if(!k.project)add('📝  Convertir en nota',async()=>{
+    if(!k.project&&!k.parent)add('📁  Convertir en proyecto',async()=>{if(await ask('¿Convertir «'+k.text+'» en proyecto? No se puede volver a convertir en tarea.','Convertir')){k.project=true;save();renderList()}});
+    add('📝  Convertir en nota',async()=>{
       if(await ask('¿Convertir «'+k.text+'» en nota? Una nota no se puede volver a convertir en tarea.','Convertir')){
         k.note=true;k.body='';save();renderList();
       }
@@ -427,6 +432,7 @@ function startDrag(e,row,k,grip){
           if(T){
             if(mode==='in'&&!(await ask('¿Anidar «'+k.text+'» dentro de «'+T.text+'»?','Anidar','Solo colocar antes')))mode='before';
             moveBlock(k,mode,T);
+            if(mode==='in'&&!T.open)toast('Anidada en «'+T.text+'». Pulsa su número para abrirla');
           }
         }
         normalize(c);save();
