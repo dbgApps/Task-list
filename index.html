@@ -97,6 +97,13 @@ button.num{border:0;font-family:inherit;cursor:pointer;color:#111;min-height:28p
 .row.nest{box-shadow:inset 0 0 0 3px var(--ink)}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);max-width:min(92vw,360px);background:#111;color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:100}
 #toast.on{opacity:1;transform:translateX(-50%)}
+.tab{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.tab.lift{opacity:1;transform:translateY(-3px);box-shadow:0 6px 14px rgba(0,0,0,.28);position:relative;z-index:2}
+.btn:disabled{opacity:.4;cursor:default}
+.row.new .mic{position:absolute;right:8px;top:5px}
+.row.new:not(.idle){padding-right:48px}
+.row.new.idle{justify-content:center;padding:0 0 1px}
+.row.new.idle .tx,.row.new.idle .grip{display:none}
 :focus-visible{outline:2px solid #111;outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -112,7 +119,7 @@ button.num{border:0;font-family:inherit;cursor:pointer;color:#111;min-height:28p
   <div id="foot">
     <div id="fr"><span id="count"></span>
       <label class="sw"><input type="checkbox" id="showDone"> Mostrar completadas</label></div>
-    <div id="cr"><span>© DBGApps Tareas v5.2</span><button id="clean" type="button" title="Borrar definitivamente las entradas completadas">🧹 Limpiar</button></div>
+    <div id="cr"><span>© DBGApps Tareas v5.3</span><button id="clean" type="button" title="Borrar definitivamente las entradas completadas">🧹 Limpiar</button></div>
   </div>
   <section id="note" hidden aria-label="Nota">
     <div id="nh"><button class="ib" id="nBack" aria-label="Volver">←</button>
@@ -133,6 +140,7 @@ button.num{border:0;font-family:inherit;cursor:pointer;color:#111;min-height:28p
 <dialog id="dt"><form method="dialog">
   <label for="tn">Nombre de la pestaña</label><input type="text" id="tn" maxlength="30" autocomplete="off">
   <label>Color</label><div class="sws" id="sws"></div>
+  <label>Posición</label><div class="btns" style="justify-content:flex-start;margin:0 0 14px"><button class="btn" type="button" id="tLeft">◀ Izquierda</button><button class="btn" type="button" id="tRight">Derecha ▶</button></div>
   <div class="btns"><button class="btn danger" type="button" id="delTab">Borrar pestaña</button><button class="btn pri" value="ok">Listo</button></div>
 </form></dialog>
 
@@ -163,12 +171,37 @@ function ask(msg,ok='Borrar',no='Cancelar'){return new Promise(res=>{$('dcOk').t
 let ni=null,commitNew=null,suppress=false,openK=null,dict=null;
 function render(){renderTabs();renderList();applySize()}
 
+let tabSup=false;
+/* pulsación larga sobre una pestaña: se levanta y se arrastra a izquierda/derecha */
+function tabPress(e,b){
+  tabSup=false;
+  const box=$('tabs'),x0=e.clientX,y0=e.clientY,pid=e.pointerId;let picked=false;
+  const timer=setTimeout(()=>{picked=true;b.classList.add('lift');navigator.vibrate&&navigator.vibrate(20);try{b.setPointerCapture(pid)}catch(_){}},350);
+  const mv=ev=>{
+    if(!picked){if(Math.hypot(ev.clientX-x0,ev.clientY-y0)>8){clearTimeout(timer);end()}return}
+    const others=[...box.children].filter(n=>n!==b);let idx=0;
+    others.forEach(n=>{const r=n.getBoundingClientRect();if(ev.clientX>r.left+r.width/2)idx++});
+    const ref=others[idx]||null;if(ref!==b.nextSibling)box.insertBefore(b,ref);
+    const br=box.getBoundingClientRect();
+    if(ev.clientX>br.right-30)box.scrollLeft+=10;else if(ev.clientX<br.left+30)box.scrollLeft-=10;
+  };
+  const up=()=>{
+    clearTimeout(timer);end();
+    if(picked){tabSup=true;const order=[...box.children].map(n=>n.dataset.id);
+      S.tabs.sort((a,c)=>order.indexOf(a.id)-order.indexOf(c.id));save();renderTabs()}
+  };
+  function end(){removeEventListener('pointermove',mv);removeEventListener('pointerup',up);removeEventListener('pointercancel',up)}
+  addEventListener('pointermove',mv);addEventListener('pointerup',up);addEventListener('pointercancel',up);
+}
+$('tabs').addEventListener('touchmove',e=>{if(document.querySelector('.tab.lift'))e.preventDefault()},{passive:false});
+
 function renderTabs(){
   const box=$('tabs');box.innerHTML='';
   S.tabs.forEach(t=>{
     const b=el('button','tab'+(t.id===S.active?' on':''));
     b.dataset.id=t.id;b.style.background=t.color;b.textContent=t.name;b.setAttribute('role','tab');
-    b.onclick=()=>{S.active=t.id;save();render()};
+    b.onclick=()=>{if(tabSup){tabSup=false;return}S.active=t.id;save();render()};
+    b.oncontextmenu=e=>e.preventDefault();b.addEventListener('pointerdown',e=>tabPress(e,b));
     box.append(b);
   });
   const on=box.querySelector('.on');if(on)on.scrollIntoView({inline:'nearest',block:'nearest'});
@@ -219,16 +252,21 @@ function renderList(){
   list.innerHTML='';
   layout(t).forEach(o=>list.append(rowEl(o.k,o.depth,o.num,o.kids)));
 
-  const nr=el('div','row new');
+  const nr=el('div','row new idle');
   nr.append(el('span','grip'));
   const plus=el('button','cb');plus.type='button';plus.textContent='+';plus.setAttribute('aria-label','Añadir tarea');
-  const me=ni=el('input','tx');me.type='text';me.placeholder='Nueva tarea…';me.enterKeyHint='done';me.autocomplete='off';
+  const me=ni=el('input','tx');me.type='text';me.enterKeyHint='done';me.autocomplete='off';
   me.setAttribute('aria-label','Nueva tarea');
-  const commit=focus=>{const v=me.value.trim();me.value='';if(!v)return;
-    const k={id:uid(),text:v,done:false};cur().tasks.push(k);save();(list.querySelector('.row.done[data-d="0"]')||nr).before(rowEl(k,0,''));updateCount();if(focus)me.focus()};
+  const setIdle=()=>nr.classList.toggle('idle',document.activeElement!==me&&!me.value.trim()&&!(dict&&dict.input===me));
+  const commit=focus=>{
+    const v=me.value.trim();me.value='';
+    if(v){const k={id:uid(),text:v,done:false};cur().tasks.push(k);save();
+      (list.querySelector('.row.done[data-d="0"]')||nr).before(rowEl(k,0,''));updateCount()}
+    if(focus)me.focus();setIdle();
+  };
   commitNew=commit;
-  const open=()=>{if(document.activeElement===me)me.blur();me.focus()};
-  me.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();stopDict();commit(true)}};
+  const open=()=>{nr.classList.remove('idle');if(document.activeElement===me)me.blur();me.focus()};
+  me.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();stopDict();commit(false);me.blur();setIdle()}};
   me.onblur=()=>{setTimeout(()=>{if(document.activeElement!==me&&!(dict&&dict.input===me))commit(false)},0)};
   plus.onpointerdown=e=>e.preventDefault();
   plus.onclick=()=>{if(me.value.trim())commit(true);else open()};
@@ -237,7 +275,7 @@ function renderList(){
   if(SR){
     const mic=el('button','mic');mic.type='button';mic.textContent='🎤';mic.setAttribute('aria-label','Dictar tarea');
     mic.onpointerdown=e=>e.preventDefault();
-    mic.onclick=()=>toggleDict(me,mic,[nr]);
+    mic.onclick=()=>{toggleDict(me,mic,[nr]);setIdle()};
     nr.append(mic);
   }
   list.append(nr);
@@ -455,11 +493,15 @@ function openTab(t){
     b.onclick=()=>{t.color=c;[...box.children].forEach(x=>x.setAttribute('aria-pressed','false'));b.setAttribute('aria-pressed','true');save();render()};
     box.append(b);
   });
-  $('delTab').style.display=S.tabs.length>1?'':'none';
+  $('delTab').style.display=S.tabs.length>1?'':'none';updMove();
   $('dt').showModal();$('tn').select();
 }
 $('tn').oninput=()=>{if(editing){editing.name=$('tn').value;save();renderTabs()}};
 $('dt').onclose=()=>{if(editing&&!editing.name.trim()){editing.name='Pestaña';save()}editing=null;render()};
+function updMove(){if(!editing)return;const i=S.tabs.indexOf(editing);$('tLeft').disabled=i<=0;$('tRight').disabled=i>=S.tabs.length-1}
+function moveTab(d){if(!editing)return;const i=S.tabs.indexOf(editing),j=i+d;if(j<0||j>=S.tabs.length)return;
+  [S.tabs[i],S.tabs[j]]=[S.tabs[j],S.tabs[i]];save();renderTabs();updMove()}
+$('tLeft').onclick=()=>moveTab(-1);$('tRight').onclick=()=>moveTab(1);
 $('editTab').onclick=()=>openTab(cur());
 $('addTab').onclick=()=>{
   const used=S.tabs.map(t=>t.color),color=COLORS.find(c=>!used.includes(c))||COLORS[S.tabs.length%COLORS.length];
