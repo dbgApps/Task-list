@@ -52,7 +52,8 @@ body{background:#e4e8ed;font:17px/1.2 "Avenir Next","Segoe UI",system-ui,sans-se
 .fill{flex:1;min-height:var(--row);cursor:text}
 #foot{background:var(--chrome);color:#333;padding:0 38px 0 14px}
 #fr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0 1px;font-size:12px;line-height:16px}
-#cr{font-size:10.5px;line-height:14px;padding:0 0 4px;color:#666}
+#cr{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10.5px;line-height:14px;padding:0 0 4px;color:#666}
+#clean{font:inherit;font-size:10.5px;line-height:14px;padding:1px 8px;border:1px solid #b9c0c8;border-radius:9px;background:transparent;color:#333;cursor:pointer;white-space:nowrap}
 .sw{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .sw input{appearance:none;-webkit-appearance:none;width:28px;height:16px;margin:0;border-radius:8px;background:#b9c0c8;position:relative;cursor:pointer;transition:background .15s}
 .sw input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .15s}
@@ -111,7 +112,7 @@ button.num{border:0;font-family:inherit;cursor:pointer;color:#111;min-height:28p
   <div id="foot">
     <div id="fr"><span id="count"></span>
       <label class="sw"><input type="checkbox" id="showDone"> Mostrar completadas</label></div>
-    <div id="cr">© DBGApps 5.1</div>
+    <div id="cr"><span>© DBGApps Tareas v5.2</span><button id="clean" type="button" title="Borrar definitivamente las entradas completadas">🧹 Limpiar</button></div>
   </div>
   <section id="note" hidden aria-label="Nota">
     <div id="nh"><button class="ib" id="nBack" aria-label="Volver">←</button>
@@ -467,14 +468,32 @@ $('addTab').onclick=()=>{
 };
 $('delTab').onclick=async()=>{
   const t=editing;if(!t)return;
-  const msg=t.tasks.length?'¿Borrar la pestaña «'+t.name+'» y sus '+t.tasks.length+' tareas?':'¿Borrar la pestaña «'+t.name+'»?';
+  const pend=t.tasks.filter(x=>!x.done).length,n=t.tasks.length;
+  const msg=n?'¿Borrar la pestaña «'+t.name+'» y sus '+n+(n===1?' entrada completada?':' entradas completadas?'):'¿Borrar la pestaña «'+t.name+'»?';
   editing=null;$('dt').close();
+  if(pend){toast('No se puede borrar «'+t.name+'»: tiene '+pend+(pend===1?' entrada sin completar':' entradas sin completar'));return}
   if(await ask(msg)){S.tabs=S.tabs.filter(x=>x!==t);S.active=S.tabs[0].id;save();render()}
 };
+
 
 /* ---------- mostrar/ocultar completadas ---------- */
 $('showDone').checked=S.showDone;
 $('showDone').onchange=e=>{S.showDone=e.target.checked;save();renderList()};
+
+/* ---------- limpiar: borra de verdad lo completado, en todas las pestañas ---------- */
+$('clean').onclick=async()=>{
+  const plan=S.tabs.map(t=>{const rm=new Set();
+    t.tasks.forEach(x=>{if(x.done){const D=ids(t,x);if(t.tasks.every(y=>!D.has(y.id)||y.done))rm.add(x.id)}});return rm});
+  const n=plan.reduce((a,r)=>a+r.size,0);
+  if(!n){toast('No hay nada que limpiar: no hay entradas completadas');return}
+  if(!await ask('Se van a borrar definitivamente '+n+(n===1?' entrada completada':' entradas completadas')+' de todas las pestañas. No se podrán recuperar. ¿Continuar?','Limpiar'))return;
+  S.tabs.forEach((t,i)=>{
+    t.tasks=t.tasks.filter(x=>!plan[i].has(x.id));
+    t.tasks.forEach(x=>{if(!x.parent)delete x.parent;if(!x.open)delete x.open;if(x.body==='')delete x.body});
+    normalize(t);
+  });
+  save();render();toast('Limpieza hecha: '+n+(n===1?' entrada borrada':' entradas borradas'));
+};
 
 /* ---------- tamaño ajustable ---------- */
 function applySize(){
