@@ -88,6 +88,11 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
 #nTitle:focus{background:rgba(255,255,255,.5)}
 #nBody{flex:1;min-height:0;border:0;resize:none;outline:none;font:inherit;line-height:32px;color:var(--ink);padding:0 16px 40px;
   background-color:transparent;background-image:repeating-linear-gradient(to bottom,transparent 0 31px,var(--line) 31px 32px);background-attachment:local}
+.num{flex:none;font-size:13px;font-weight:700;color:#333;background:rgba(255,255,255,.55);border-radius:5px;padding:2px 5px}
+.row.project .tx{font-weight:700}
+.row.nest{box-shadow:inset 0 0 0 3px var(--ink)}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);max-width:min(92vw,360px);background:#111;color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:100}
+#toast.on{opacity:1;transform:translateX(-50%)}
 :focus-visible{outline:2px solid #111;outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -101,7 +106,7 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
   </div>
   <div id="list"></div>
   <div id="foot">
-    <span><span id="count"></span> <small style="opacity:.6">v4</small></span>
+    <span><span id="count"></span> <small style="opacity:.6">v5</small></span>
     <label class="sw"><input type="checkbox" id="showDone"> Mostrar completadas</label>
   </div>
   <section id="note" hidden aria-label="Nota">
@@ -113,8 +118,9 @@ dialog input[type=text]{width:100%;font:inherit;padding:9px 10px;border:1.5px so
   <div id="grip" title="Cambiar tamaño" aria-label="Cambiar tamaño"></div>
 </main>
 
+<div id="toast" role="status"></div>
 <dialog id="dc"><form method="dialog"><p id="dcMsg"></p>
-  <div class="btns"><button class="btn" value="no">Cancelar</button><button class="btn pri" value="yes" id="dcOk">Borrar</button></div></form></dialog>
+  <div class="btns"><button class="btn" value="no" id="dcNo">Cancelar</button><button class="btn pri" value="yes" id="dcOk">Borrar</button></div></form></dialog>
 
 <dialog id="dm"><form method="dialog"><p id="dmTitle"></p><div id="dmItems"></div>
   <div class="btns"><button class="btn">Cerrar</button></div></form></dialog>
@@ -143,7 +149,7 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 const cur=()=>S.tabs.find(t=>t.id===S.active);
 
 /* ---------- diálogos ---------- */
-function ask(msg,ok='Borrar'){return new Promise(res=>{$('dcOk').textContent=ok;
+function ask(msg,ok='Borrar',no='Cancelar'){return new Promise(res=>{$('dcOk').textContent=ok;$('dcNo').textContent=no;
   $('dcMsg').textContent=msg;const d=$('dc');d.returnValue='';
   d.onclose=()=>res(d.returnValue==='yes');d.showModal();
 })}
@@ -165,11 +171,48 @@ function renderTabs(){
 
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('on'),3200)}
+/* ids de una entrada y de todo lo que cuelga de ella */
+function ids(t,k){const s=new Set([k.id]);let ch=true;while(ch){ch=false;t.tasks.forEach(x=>{if(!s.has(x.id)&&s.has(x.parent)){s.add(x.id);ch=true}})}return s}
+/* si algo está pendiente, sus superiores no pueden estar completados */
+function normalize(t){const m=new Map(t.tasks.map(x=>[x.id,x]));t.tasks.forEach(x=>{if(!x.done){let p=m.get(x.parent);while(p){p.done=false;p=m.get(p.parent)}}})}
+/* orden de pantalla y numeración (1, 1.1, 1.1.2…) calculados al momento */
+function layout(t){
+  const have=new Set(t.tasks.map(x=>x.id)),by=new Map();
+  t.tasks.forEach(x=>{const p=x.parent&&have.has(x.parent)?x.parent:null;if(!by.has(p))by.set(p,[]);by.get(p).push(x)});
+  const kids=x=>by.get(x.id)||[],roots=by.get(null)||[];
+  let n=0;const rn=new Map();roots.forEach(x=>{if(x.project||kids(x).length)rn.set(x.id,++n)});
+  const order=S.showDone?[...roots.filter(x=>!x.done),...roots.filter(x=>x.done)]:roots.filter(x=>!x.done);
+  const out=[];
+  const walk=(x,d,num)=>{if(!S.showDone&&x.done)return;out.push({k:x,depth:d,num});kids(x).forEach((c,i)=>walk(c,d+1,num+'.'+(i+1)))};
+  order.forEach(x=>walk(x,0,rn.has(x.id)?String(rn.get(x.id)):''));
+  return out;
+}
+/* mueve una entrada con todo lo que cuelga de ella */
+function moveBlock(k,mode,T,toTab){
+  const c=cur(),B=ids(c,k),blk=c.tasks.filter(x=>B.has(x.id));
+  c.tasks=c.tasks.filter(x=>!B.has(x.id));
+  if(toTab){k.parent=null;toTab.tasks.push(...blk);return}
+  if(mode==='end'||!T){k.parent=null;c.tasks.push(...blk);return}
+  const TS=ids(c,T);let last=-1;c.tasks.forEach((x,i)=>{if(TS.has(x.id))last=i});
+  const first=c.tasks.indexOf(T);
+  if(mode==='before'){k.parent=T.parent||null;c.tasks.splice(first,0,...blk)}
+  else if(mode==='after'){k.parent=T.parent||null;c.tasks.splice(last+1,0,...blk)}
+  else{k.parent=T.id;c.tasks.splice(last+1,0,...blk)}
+}
+function tryDelete(k){
+  const c=cur();
+  if(c.tasks.some(x=>x.parent===k.id)){toast('No se puede borrar: primero hay que borrar lo que cuelga de ella');return}
+  ask('¿Borrar '+(k.note?'la nota':k.project?'el proyecto':'la tarea')+' «'+k.text+'»?').then(ok=>{
+    if(ok){c.tasks=c.tasks.filter(z=>z!==k);save();renderList()}
+  });
+}
+
 function renderList(){
   const t=cur(),list=$('list');
   list.style.setProperty('--bg',t.color);
   list.innerHTML='';
-  t.tasks.forEach(k=>{if(S.showDone||!k.done)list.append(rowEl(k))});
+  layout(t).forEach(o=>list.append(rowEl(o.k,o.depth,o.num)));
 
   const nr=el('div','row new');
   nr.append(el('span','grip'));
@@ -177,7 +220,7 @@ function renderList(){
   const me=ni=el('input','tx');me.type='text';me.placeholder='Nueva tarea…';me.enterKeyHint='done';me.autocomplete='off';
   me.setAttribute('aria-label','Nueva tarea');
   const commit=focus=>{const v=me.value.trim();me.value='';if(!v)return;
-    const k={id:uid(),text:v,done:false};cur().tasks.push(k);save();nr.before(rowEl(k));updateCount();if(focus)me.focus()};
+    const k={id:uid(),text:v,done:false};cur().tasks.push(k);save();(list.querySelector('.row.done[data-d="0"]')||nr).before(rowEl(k,0,''));updateCount();if(focus)me.focus()};
   commitNew=commit;
   const open=()=>{if(document.activeElement===me)me.blur();me.focus()};
   me.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();stopDict();commit(true)}};
@@ -213,12 +256,17 @@ function hoverScroll(n){
   n.addEventListener('pointerleave',()=>{if(document.activeElement!==n)n.scrollLeft=0});
 }
 
-function rowEl(k){
-  const r=el('div','row'+(k.done?' done':'')+(k.note?' note':''));r.dataset.id=k.id;
+function rowEl(k,depth=0,num=''){
+  const r=el('div','row'+(k.done?' done':'')+(k.note?' note':'')+(k.project?' project':''));r.dataset.id=k.id;r.dataset.d=depth;r.style.paddingLeft=(4+Math.min(depth,6)*16)+'px';
   const g=el('span','grip');g.textContent='⠿';g.setAttribute('aria-label','Arrastrar para ordenar o mover');
   const cb=el('input','cb');cb.type='checkbox';cb.checked=k.done;cb.setAttribute('aria-label','Completada');
-  cb.onchange=()=>{k.done=cb.checked;save();if(!S.showDone&&k.done)r.remove();else r.classList.toggle('done',k.done);updateCount()};
+  cb.onchange=()=>{
+    const c=cur(),D=ids(c,k);
+    if(cb.checked&&c.tasks.some(x=>x!==k&&D.has(x.id)&&!x.done)){cb.checked=false;toast('Antes hay que completar todo lo que cuelga de esta entrada');return}
+    k.done=cb.checked;if(!k.done)normalize(c);save();renderList();
+  };
   r.append(g,cb);
+  if(num){const nm=el('span','num');nm.textContent=num;r.append(nm)}
   let tx;
   if(k.note){
     const ic=el('span','nic');ic.textContent='📝';ic.setAttribute('aria-hidden','true');
@@ -232,6 +280,7 @@ function rowEl(k){
     tx.oninput=()=>{k.text=tx.value;save()};
     tx.onblur=()=>{const v=tx.value.trim();if(!v){k.text=tx.dataset.old;tx.value=k.text}else{k.text=v;tx.value=v}save()};
     tx.onkeydown=e=>{if(e.key==='Enter')tx.blur()};
+    if(k.project){const pi=el('span','nic');pi.textContent='📁';pi.setAttribute('aria-hidden','true');r.append(pi)}
     r.append(tx);
   }
   const mb=el('button','nbtn');mb.type='button';mb.textContent='⋮';mb.title='Opciones';mb.setAttribute('aria-label','Opciones de la '+(k.note?'nota':'tarea'));
@@ -300,17 +349,14 @@ function openMenu(k,tx,btn,r){
   }else{
     add('⌨️  Editar con el teclado',()=>{tx.focus();const n=tx.value.length;tx.setSelectionRange(n,n)});
     if(SR)add('🎤  Añadir texto por voz',()=>startDict(tx,btn,[r]));
-    add('📝  Convertir en nota',async()=>{
+    if(!k.project)add('📁  Convertir en proyecto',async()=>{if(await ask('¿Convertir «'+k.text+'» en proyecto? No se puede volver a convertir en tarea.','Convertir')){k.project=true;save();renderList()}});
+    if(!k.project)add('📝  Convertir en nota',async()=>{
       if(await ask('¿Convertir «'+k.text+'» en nota? Una nota no se puede volver a convertir en tarea.','Convertir')){
         k.note=true;k.body='';save();renderList();
       }
     });
   }
-  add('🗑️  Borrar',async()=>{
-    if(await ask('¿Borrar '+(k.note?'la nota':'la tarea')+' «'+k.text+'»?')){
-      const c=cur();c.tasks=c.tasks.filter(z=>z!==k);save();renderList();
-    }
-  },'danger');
+  add('🗑️  Borrar',()=>tryDelete(k),'danger');
   $('dm').showModal();
 }
 
@@ -338,9 +384,7 @@ function longPress(e,k){
   const t=setTimeout(async()=>{
     cancel();suppress=true;if(document.activeElement)document.activeElement.blur();
     navigator.vibrate&&navigator.vibrate(30);
-    if(await ask('¿Borrar '+(k.note?'la nota':'la tarea')+' «'+k.text+'»?')){
-      const t2=cur();t2.tasks=t2.tasks.filter(z=>z!==k);save();renderList();
-    }
+    tryDelete(k);
   },1200);
   const mv=ev=>{if(Math.hypot(ev.clientX-x,ev.clientY-y)>10)cancel()};
   function cancel(){clearTimeout(t);removeEventListener('pointermove',mv);removeEventListener('pointerup',cancel);removeEventListener('pointercancel',cancel)}
@@ -356,30 +400,39 @@ function startDrag(e,row,k,grip){
   ghost.style.width=rect.width+'px';ghost.style.left=rect.left+'px';ghost.style.top=rect.top+'px';
   ghost.style.background=cur().color;
   document.body.append(ghost);row.classList.add('dragging');
-  let drop=null;
-  const clear=()=>{document.querySelectorAll('.before,.after,.drop').forEach(n=>n.classList.remove('before','after','drop'))};
+  let drop=null;const own=ids(cur(),k);
+  const clear=()=>{document.querySelectorAll('.before,.after,.drop,.nest').forEach(n=>n.classList.remove('before','after','drop','nest'))};
   const move=ev=>{
     ghost.style.left=(ev.clientX-dx)+'px';ghost.style.top=(ev.clientY-dy)+'px';
     clear();drop=null;
     const t=document.elementFromPoint(ev.clientX,ev.clientY);if(!t)return;
     const tab=t.closest('.tab'),r=t.closest('.row:not(.new)');
     if(tab&&tab.dataset.id!==S.active){tab.classList.add('drop');drop={tab:tab.dataset.id}}
-    else if(r&&r.dataset.id!==k.id){
-      const b=r.getBoundingClientRect(),after=ev.clientY>b.top+b.height/2;
-      r.classList.add(after?'after':'before');drop={id:r.dataset.id,after};
+    else if(r&&!own.has(r.dataset.id)){
+      const b=r.getBoundingClientRect(),f=(ev.clientY-b.top)/b.height,mode=f<.3?'before':f>.7?'after':'in';
+      r.classList.add(mode==='in'?'nest':mode);drop={id:r.dataset.id,mode};
     }else if(t.closest('#list')&&!r)drop={end:true};
   };
   const up=()=>{
     grip.removeEventListener('pointermove',move);grip.removeEventListener('pointerup',up);grip.removeEventListener('pointercancel',up);
     ghost.remove();clear();
-    if(drop){
-      const c=cur();c.tasks=c.tasks.filter(z=>z!==k);
-      if(drop.tab)S.tabs.find(t=>t.id===drop.tab).tasks.push(k);
-      else if(drop.end)c.tasks.push(k);
-      else{let i=c.tasks.findIndex(z=>z.id===drop.id);if(i<0)i=c.tasks.length;if(drop.after)i++;c.tasks.splice(i,0,k)}
-      save();
-    }
-    renderList();
+    const d=drop;drop=null;
+    (async()=>{
+      if(d){
+        const c=cur();
+        if(d.tab){const tt=S.tabs.find(t=>t.id===d.tab);moveBlock(k,'end',null,tt);normalize(tt)}
+        else if(d.end)moveBlock(k,'end');
+        else{
+          const T=c.tasks.find(x=>x.id===d.id);let mode=d.mode;
+          if(T){
+            if(mode==='in'&&!(await ask('¿Anidar «'+k.text+'» dentro de «'+T.text+'»?','Anidar','Solo colocar antes')))mode='before';
+            moveBlock(k,mode,T);
+          }
+        }
+        normalize(c);save();
+      }
+      renderList();
+    })();
   };
   grip.addEventListener('pointermove',move);grip.addEventListener('pointerup',up);grip.addEventListener('pointercancel',up);
 }
